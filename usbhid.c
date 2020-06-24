@@ -23,16 +23,115 @@
 #include <libopencm3/stm32/rcc.h>
 #include <libopencm3/stm32/gpio.h>
 #include <libopencm3/usb/usbd.h>
+#include <libopencm3/usb/cdc.h>
 #include <libopencm3/usb/hid.h>
 
-/* Define this to include the DFU APP interface. */
-// #define INCLUDE_DFU_INTERFACE
+/* Serial ACM interface */
+#define CDCACM_PACKET_SIZE 	128
+#define CDCACM_UART_ENDPOINT	0x03
+#define CDCACM_INTR_ENDPOINT	0x84
 
-#ifdef INCLUDE_DFU_INTERFACE
-#include <libopencm3/cm3/scb.h>
-#include <libopencm3/usb/dfu.h>
-#endif
+static const struct usb_endpoint_descriptor uart_comm_endp[] = {{
+	.bLength = USB_DT_ENDPOINT_SIZE,
+	.bDescriptorType = USB_DT_ENDPOINT,
+	.bEndpointAddress = CDCACM_INTR_ENDPOINT,
+	.bmAttributes = USB_ENDPOINT_ATTR_INTERRUPT,
+	.wMaxPacketSize = 16,
+	.bInterval = 255,
+}};
 
+static const struct usb_endpoint_descriptor uart_data_endp[] = {{
+	.bLength = USB_DT_ENDPOINT_SIZE,
+	.bDescriptorType = USB_DT_ENDPOINT,
+	.bEndpointAddress = CDCACM_UART_ENDPOINT,
+	.bmAttributes = USB_ENDPOINT_ATTR_BULK,
+	.wMaxPacketSize = CDCACM_PACKET_SIZE,
+	.bInterval = 1,
+}, {
+	.bLength = USB_DT_ENDPOINT_SIZE,
+	.bDescriptorType = USB_DT_ENDPOINT,
+	.bEndpointAddress = 0x80 | CDCACM_UART_ENDPOINT,
+	.bmAttributes = USB_ENDPOINT_ATTR_BULK,
+	.wMaxPacketSize = CDCACM_PACKET_SIZE,
+	.bInterval = 1,
+}};
+
+static const struct {
+	struct usb_cdc_header_descriptor header;
+	struct usb_cdc_call_management_descriptor call_mgmt;
+	struct usb_cdc_acm_descriptor acm;
+	struct usb_cdc_union_descriptor cdc_union;
+} __attribute__((packed)) uart_cdcacm_functional_descriptors = {
+	.header = {
+		.bFunctionLength = sizeof(struct usb_cdc_header_descriptor),
+		.bDescriptorType = CS_INTERFACE,
+		.bDescriptorSubtype = USB_CDC_TYPE_HEADER,
+		.bcdCDC = 0x0110,
+	},
+	.call_mgmt = {
+		.bFunctionLength =
+			sizeof(struct usb_cdc_call_management_descriptor),
+		.bDescriptorType = CS_INTERFACE,
+		.bDescriptorSubtype = USB_CDC_TYPE_CALL_MANAGEMENT,
+		.bmCapabilities = 0,
+		.bDataInterface = 2,
+	},
+	.acm = {
+		.bFunctionLength = sizeof(struct usb_cdc_acm_descriptor),
+		.bDescriptorType = CS_INTERFACE,
+		.bDescriptorSubtype = USB_CDC_TYPE_ACM,
+		.bmCapabilities = 2, /* SET_LINE_CODING supported*/
+	},
+	.cdc_union = {
+		.bFunctionLength = sizeof(struct usb_cdc_union_descriptor),
+		.bDescriptorType = CS_INTERFACE,
+		.bDescriptorSubtype = USB_CDC_TYPE_UNION,
+		.bControlInterface = 1,
+		.bSubordinateInterface0 = 2,
+	 }
+};
+
+const struct usb_interface_descriptor uart_comm_iface[] = {{
+	.bLength = USB_DT_INTERFACE_SIZE,
+	.bDescriptorType = USB_DT_INTERFACE,
+	.bInterfaceNumber = 1,
+	.bAlternateSetting = 0,
+	.bNumEndpoints = 1,
+	.bInterfaceClass = USB_CLASS_CDC,
+	.bInterfaceSubClass = USB_CDC_SUBCLASS_ACM,
+	.bInterfaceProtocol = USB_CDC_PROTOCOL_AT,
+	.iInterface = 4,
+
+	.endpoint = uart_comm_endp,
+
+	.extra = &uart_cdcacm_functional_descriptors,
+	.extralen = sizeof(uart_cdcacm_functional_descriptors)
+}};
+
+const struct usb_interface_descriptor uart_data_iface[] = {{
+	.bLength = USB_DT_INTERFACE_SIZE,
+	.bDescriptorType = USB_DT_INTERFACE,
+	.bInterfaceNumber = 2,
+	.bAlternateSetting = 0,
+	.bNumEndpoints = 2,
+	.bInterfaceClass = USB_CLASS_DATA,
+	.bInterfaceSubClass = 0,
+	.bInterfaceProtocol = 0,
+	.iInterface = 0,
+
+	.endpoint = uart_data_endp,
+}};
+
+const struct usb_iface_assoc_descriptor uart_assoc = {
+	.bLength = USB_DT_INTERFACE_ASSOCIATION_SIZE,
+	.bDescriptorType = USB_DT_INTERFACE_ASSOCIATION,
+	.bFirstInterface = 1,
+	.bInterfaceCount = 2,
+	.bFunctionClass = USB_CLASS_CDC,
+	.bFunctionSubClass = USB_CDC_SUBCLASS_ACM,
+	.bFunctionProtocol = USB_CDC_PROTOCOL_AT,
+	.iFunction = 0,
+};
 static usbd_device *usbd_dev;
 
 const struct usb_device_descriptor dev_descr = {
@@ -133,51 +232,23 @@ const struct usb_interface_descriptor hid_iface = {
 	.extralen = sizeof(hid_function),
 };
 
-#ifdef INCLUDE_DFU_INTERFACE
-const struct usb_dfu_descriptor dfu_function = {
-	.bLength = sizeof(struct usb_dfu_descriptor),
-	.bDescriptorType = DFU_FUNCTIONAL,
-	.bmAttributes = USB_DFU_CAN_DOWNLOAD | USB_DFU_WILL_DETACH,
-	.wDetachTimeout = 255,
-	.wTransferSize = 1024,
-	.bcdDFUVersion = 0x011A,
-};
-
-const struct usb_interface_descriptor dfu_iface = {
-	.bLength = USB_DT_INTERFACE_SIZE,
-	.bDescriptorType = USB_DT_INTERFACE,
-	.bInterfaceNumber = 1,
-	.bAlternateSetting = 0,
-	.bNumEndpoints = 0,
-	.bInterfaceClass = 0xFE,
-	.bInterfaceSubClass = 1,
-	.bInterfaceProtocol = 1,
-	.iInterface = 0,
-
-	.extra = &dfu_function,
-	.extralen = sizeof(dfu_function),
-};
-#endif
-
 const struct usb_interface ifaces[] = {{
 	.num_altsetting = 1,
 	.altsetting = &hid_iface,
-#ifdef INCLUDE_DFU_INTERFACE
 }, {
 	.num_altsetting = 1,
-	.altsetting = &dfu_iface,
-#endif
+	.iface_assoc = &uart_assoc,
+	.altsetting = uart_comm_iface,
+}, {
+	.num_altsetting = 1,
+	.altsetting = uart_data_iface,
 }};
 
 const struct usb_config_descriptor config = {
 	.bLength = USB_DT_CONFIGURATION_SIZE,
 	.bDescriptorType = USB_DT_CONFIGURATION,
 	.wTotalLength = 0,
-#ifdef INCLUDE_DFU_INTERFACE
-	.bNumInterfaces = 2,
-#else
-	.bNumInterfaces = 1,
-#endif
+	.bNumInterfaces = sizeof(ifaces)/sizeof(ifaces[0]),
 	.bConfigurationValue = 1,
 	.iConfiguration = 0,
 	.bmAttributes = 0xC0,
@@ -189,7 +260,8 @@ const struct usb_config_descriptor config = {
 static const char *usb_strings[] = {
 	"nhtranngoc,. Inc",
 	"STMDino",
-	"DEMO",
+	"ABC",
+	"STMDino Serial Port"
 };
 
 /* Buffer to be used for control requests. */
@@ -213,34 +285,6 @@ static enum usbd_request_return_codes hid_control_request(usbd_device *dev, stru
 	return USBD_REQ_HANDLED;
 }
 
-#ifdef INCLUDE_DFU_INTERFACE
-static void dfu_detach_complete(usbd_device *dev, struct usb_setup_data *req)
-{
-	(void)req;
-	(void)dev;
-
-	gpio_set_mode(GPIOA, GPIO_MODE_OUTPUT_2_MHZ,
-		      GPIO_CNF_OUTPUT_PUSHPULL, GPIO10);
-	gpio_set(GPIOA, GPIO10);
-	scb_reset_core();
-}
-
-static enum usbd_request_return_codes dfu_control_request(usbd_device *dev, struct usb_setup_data *req, uint8_t **buf, uint16_t *len,
-			void (**complete)(usbd_device *, struct usb_setup_data *))
-{
-	(void)buf;
-	(void)len;
-	(void)dev;
-
-	if ((req->bmRequestType != 0x21) || (req->bRequest != DFU_DETACH))
-		return USBD_REQ_NOTSUPP; /* Only accept class request. */
-
-	*complete = dfu_detach_complete;
-
-	return USBD_REQ_HANDLED;
-}
-#endif
-
 static void hid_set_config(usbd_device *dev, uint16_t wValue)
 {
 	(void)wValue;
@@ -253,14 +297,6 @@ static void hid_set_config(usbd_device *dev, uint16_t wValue)
 				USB_REQ_TYPE_STANDARD | USB_REQ_TYPE_INTERFACE,
 				USB_REQ_TYPE_TYPE | USB_REQ_TYPE_RECIPIENT,
 				hid_control_request);
-#ifdef INCLUDE_DFU_INTERFACE
-	usbd_register_control_callback(
-				dev,
-				USB_REQ_TYPE_CLASS | USB_REQ_TYPE_INTERFACE,
-				USB_REQ_TYPE_TYPE | USB_REQ_TYPE_RECIPIENT,
-				dfu_control_request);
-#endif
-
 	systick_set_clocksource(STK_CSR_CLKSOURCE_AHB_DIV8);
 	/* SysTick interrupt every N clock pulses: set reload to N-1 */
 	systick_set_reload(99999);
