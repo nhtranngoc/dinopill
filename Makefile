@@ -18,7 +18,7 @@
 ##
 
 OBJS = cdc.o hid.o
-BINARY = usbhid
+BINARY = dinopill
 LIBNAME		= opencm3_stm32f1
 DEFS		+= -DSTM32F1
 
