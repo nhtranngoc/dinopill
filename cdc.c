@@ -146,20 +146,26 @@ static enum usbd_request_return_codes cdcacm_control_request(usbd_device *dev,
 void cdcacm_data_rx_cb(usbd_device *dev, uint8_t ep) {
   (void)ep;
   char buf[64];
-  int len = usbd_ep_read_packet(dev, 0x01, buf, 64);
+  int len = usbd_ep_read_packet(dev, CDCACM_UART_ENDPOINT, buf, 64);
 
-  if (len) {
-    usbd_ep_write_packet(dev, 0x82, buf, len);
-    buf[len] = 0;
+  if (len > 0) {
+    // usbd_ep_write_packet(dev, CDCACM_UART_ENDPOINT, buf, len);
+    // buf[len] = 0;
+	send_chunked_blocking(buf, len, dev, CDCACM_UART_ENDPOINT, 64);
   }
+}
+
+void cdcacm_data_tx_cb(usbd_device *dev, uint8_t ep) {
+	(void) dev;
+	(void) ep;
 }
 
 void cdcacm_set_config(usbd_device *dev, uint16_t wValue) {
   (void)wValue;
 
-	usbd_ep_setup(dev, 0x01, USB_ENDPOINT_ATTR_BULK, 64, cdcacm_data_rx_cb);
-	usbd_ep_setup(dev, 0x82, USB_ENDPOINT_ATTR_BULK, 64, NULL);
-  	usbd_ep_setup(dev, 0x83, USB_ENDPOINT_ATTR_INTERRUPT, 16, NULL);
+	usbd_ep_setup(dev, CDCACM_UART_ENDPOINT, USB_ENDPOINT_ATTR_BULK, 64, cdcacm_data_rx_cb);
+	usbd_ep_setup(dev, 0x80 | CDCACM_UART_ENDPOINT, USB_ENDPOINT_ATTR_BULK, 64, cdcacm_data_tx_cb);
+  	usbd_ep_setup(dev, CDCACM_INTR_ENDPOINT, USB_ENDPOINT_ATTR_INTERRUPT, 16, NULL);
 
   
   usbd_register_control_callback(dev,

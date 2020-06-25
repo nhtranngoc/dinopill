@@ -33,6 +33,8 @@
 
 static usbd_device *usbd_dev;
 uint16_t sensor;
+char string[256];
+uint8_t len;
 
 const struct usb_device_descriptor dev_descr = {
 	.bLength = USB_DT_DEVICE_SIZE,
@@ -115,11 +117,23 @@ int main(void) {
 
 	usbd_dev = usbd_init(&st_usbfs_v1_usb_driver, &dev_descr, &config, usb_strings, 3, usbd_control_buffer, sizeof(usbd_control_buffer));
 	usbd_register_set_config_callback(usbd_dev, usb_set_config);
-	sensor = read_adc(0);
+	nvic_enable_irq(NVIC_USB_LP_CAN_RX0_IRQ);
 
 	while (1) {
-		usbd_poll(usbd_dev);
+		sensor = read_adc(0);
+
+		if(sensor > OBJECT_BASELINE) {
+			len = sprintf(string, "Obstacle.\n");
+		} else {
+			len = sprintf(string, "Normal...\n");
+		}
 	}
+}
+
+// Interrupt handler for low priority USB events - using this to avoid
+// polling in our main loop
+void usb_lp_can_rx0_isr(void) {
+    usbd_poll(usbd_dev);
 }
 
 void sys_tick_handler(void) {
@@ -133,16 +147,6 @@ void sys_tick_handler(void) {
 	// // Release
 	// buf[2] = 0;
 	// usbd_ep_write_packet(usbd_dev, 0x81, buf, sizeof(buf));
-
-	sensor = read_adc(0);
-	char string[256];
-	uint8_t len;
-
-	if(sensor > OBJECT_BASELINE) {
-		len = sprintf(string, "Obstacle.\n");
-	} else {
-		len = sprintf(string, "Normal...\n");
-	}
 
 	// uint8_t len = sprintf(string, "Light sensor: %d.\n", sensor);
 	send_chunked_blocking(string, len, usbd_dev, CDCACM_UART_ENDPOINT, CDCACM_PACKET_SIZE);
