@@ -27,8 +27,12 @@
 #include <stdio.h>
 #include "cdc.h"
 #include "hid.h"
+#include "adc.h"
+
+#define OBJECT_BASELINE 420
 
 static usbd_device *usbd_dev;
+uint16_t sensor;
 
 const struct usb_device_descriptor dev_descr = {
 	.bLength = USB_DT_DEVICE_SIZE,
@@ -107,26 +111,39 @@ int main(void) {
 		__asm__("nop");
 	}
 
+	adc_setup();
+
 	usbd_dev = usbd_init(&st_usbfs_v1_usb_driver, &dev_descr, &config, usb_strings, 3, usbd_control_buffer, sizeof(usbd_control_buffer));
 	usbd_register_set_config_callback(usbd_dev, usb_set_config);
+	sensor = read_adc(0);
 
-	while (1)
+	while (1) {
 		usbd_poll(usbd_dev);
+	}
 }
 
 void sys_tick_handler(void) {
-	uint8_t buf[8] = { 0 };
-	buf[0] = 0; // shift
-	buf[1] = 0;
-	buf[2] = 0x04; // 'A'
+	// uint8_t buf[8] = { 0 };
+	// buf[0] = 0; // shift
+	// buf[1] = 0;
+	// buf[2] = 0x04; // 'A'
 
-	usbd_ep_write_packet(usbd_dev, 0x81, buf, sizeof(buf));
+	// usbd_ep_write_packet(usbd_dev, 0x81, buf, sizeof(buf));
 
-	// Release
-	buf[2] = 0;
-	usbd_ep_write_packet(usbd_dev, 0x81, buf, sizeof(buf));
+	// // Release
+	// buf[2] = 0;
+	// usbd_ep_write_packet(usbd_dev, 0x81, buf, sizeof(buf));
 
+	sensor = read_adc(0);
 	char string[256];
-	uint8_t len = sprintf(string, "Hello world.\n");
+	uint8_t len;
+
+	if(sensor > OBJECT_BASELINE) {
+		len = sprintf(string, "Obstacle.\n");
+	} else {
+		len = sprintf(string, "Normal...\n");
+	}
+
+	// uint8_t len = sprintf(string, "Light sensor: %d.\n", sensor);
 	send_chunked_blocking(string, len, usbd_dev, CDCACM_UART_ENDPOINT, CDCACM_PACKET_SIZE);
 }

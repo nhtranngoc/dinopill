@@ -17,7 +17,7 @@
 ## along with this library.  If not, see <http://www.gnu.org/licenses/>.
 ##
 
-OBJS = cdc.o hid.o
+OBJS = cdc.o hid.o adc.o
 BINARY = dinopill
 LIBNAME		= opencm3_stm32f1
 DEFS		+= -DSTM32F1
